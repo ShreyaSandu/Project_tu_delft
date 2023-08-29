@@ -1,0 +1,204 @@
+#initialize stuff
+import gym
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+
+
+#fitness function
+def fitnessFunction(data,rewards):
+    
+    #getting data from the observations of teh lunar lander env
+    xLocation = data[0]
+    angle = data[4]
+    horVelocity = data[2]
+    verVelocity = data[3]
+    
+    maxSpeed = 0.3
+    
+    leftLeg = data[6] * 20 
+    rightLeg = data[7] * 20    
+    distanceFlags= abs(xLocation - 0)
+    anglePts = 20- int(20* (abs(angle)/3.14))
+    horVelocitPts = 20 - int( 20*(min(abs(horVelocity), maxSpeed) / maxSpeed) )
+    verVelocitPts = 20 - int( 20*(min(abs(verVelocity), maxSpeed) / maxSpeed) )
+
+    #fitness function that gives weight to each aspect of a sucessful run
+    #old function: fitness = 5* (leftLeg + rightLeg + distanceFlags +horVelocitPts + verVelocitPts + anglePts)/6
+
+    fitness = 5* ((10 * leftLeg 
+                 + 10 * rightLeg 
+                 + 40 * distanceFlags 
+                 + 15 * horVelocitPts 
+                 + 15 * verVelocitPts 
+                 + 10 * anglePts) 
+                 / (100))
+    
+    
+    return fitness #returns the fitness value
+
+''' 
+    #6 weights must sum to 100
+    fitness = 5* ((10 * leftLeg 
+                 + 10 * rightLeg 
+                 + 40 * distanceFlags 
+                 + 15 * horVelocitPts 
+                 + 15 * verVelocitPts 
+                 + 10 * anglePts) 
+                 / (100))
+'''
+  
+
+#genetic algorithm
+def geneticAlgorithm(gen, fitnessGen0, solutionsGen0, numberParents, numberKids, alpha=0.5):
+    childrenGen1 = []
+
+    # Select the parents based on most sucessful runs
+    indexes = np.argpartition(-fitnessGen0, numberParents)[:numberParents]
+    parents = solutionsGen0[indexes]
+
+    for j in range(numberKids):
+        # Randomly select parents from the highest scores
+        parent1 = random.choice(parents)
+        parent2 = random.choice(parents)
+
+        child = np.empty_like(parent1)
+
+        # Crossover strategy: blend
+        for k in range(len(parent1)):
+            min_val = min(parent1[k], parent2[k])
+            max_val = max(parent1[k], parent2[k])
+            range_val = max_val - min_val
+            lower_bound = min_val - range_val * alpha
+            upper_bound = max_val + range_val * alpha
+            child[k] = np.random.uniform(lower_bound, upper_bound)
+
+        #mutation rate at 20%
+        mutationRate = 0.2
+        
+        # Apply mutation based on rate, note out of 1 not 100, so .2 = 20%
+        for k in range(len(child)):
+            numbs = random.random()
+            if numbs < mutationRate:
+                child[k] = child[k] + np.random.normal(0, 0.2)
+                
+        childrenGen1.append(child)
+
+    #array of children solutions
+    childrenGen1 = np.array(childrenGen1)
+
+    #array of average fitness of generation
+    avgFitness = np.mean(fitnessGen0[indexes])  # Calculate average fitness 
+
+
+    return childrenGen1
+
+
+
+#function to run the generation through the simulation
+def simulateGen(solutions):
+    fitnessVals = []
+    
+    #setup environment 
+    for i in solutions:
+        setup = gym.make('LunarLander-v2')
+        data = setup.reset()
+        
+        #instead of random actions, use the solutions of the new generation
+        for steps in range(1000):
+             actionIndexes = np.argmax(i[:4])
+             results = setup.step(actionIndexes)
+             observation = results[0]
+             reward = results[1]
+             done = results[2]
+             info = results[3]       
+        
+             if done:
+                 lastData = observation
+                 fitness = fitnessFunction(lastData, reward)  #plus the runs through the fitness function
+                 fitnessVals.append(fitness)
+                 break  
+    
+        setup.close()
+        
+
+    return fitnessVals #returns fitness values of the generation
+
+
+#start arrays
+solutions = []
+fitnessVals = []
+population0 = 100 #popluation of gen 0
+
+# Initialize the initial, random population
+for i in range(population0):
+    setup = gym.make('LunarLander-v2')
+    data = setup.reset()
+    
+    #run random actions for gen 0
+    for steps in range(10000):
+        action = setup.action_space.sample()
+        results = setup.step(action)
+        observation = results[0]
+        reward = results[1]
+        done = results[2]
+        info = results[3]
+        
+        if done:
+            lastData = observation
+            break
+    
+    setup.close()
+    
+    fitness = fitnessFunction(lastData, reward) #fitness of gen0
+    
+    solutions.append(lastData)
+    fitnessVals.append(fitness)
+    
+solutionsGen0 = np.array(solutions)
+fitnessGen0 = np.array(fitnessVals)
+
+# Apply the genetic algorithm to evolve the population
+
+children = geneticAlgorithm(0, fitnessGen0, solutionsGen0, 6, 100)
+
+fitnessVals1 = simulateGen(children)
+
+fitnessVals = np.array(fitnessVals1)
+
+
+#loop to repeat above and make more generations
+genLoops = 20  #number of generations
+fitnessPlotHist = [];
+bestSols = [];
+for i in range(genLoops):
+
+    children = geneticAlgorithm(i+1, fitnessVals, children, 6, 100) #make children population
+
+    fitnessVals_x = simulateGen(children)  #index for fitness values
+
+    fitnessVals = np.array(fitnessVals_x) #fitness values
+    
+    fitnessAvg = np.mean(fitnessVals); #average of fitness values
+    fitnessPlotHist.append(fitnessAvg) 
+
+
+#plot the average fitness of the generations to show growth and learning
+plt.plot(range(2, genLoops + 1), fitnessPlotHist [1:], marker='o')
+plt.xlabel('Generation')
+plt.ylabel('Average Fitness')
+plt.title('Fitness across generations')
+plt.grid()
+
+
+#find the line of best fit
+x = np.array(range(2, genLoops + 1))
+y = np.array(fitnessPlotHist[1:])
+fit = np.polyfit(x, y, 1)
+fit_fn = np.poly1d(fit)
+
+plt.plot(x, fit_fn(x), '--k')
+
+plt.show()
+
+
